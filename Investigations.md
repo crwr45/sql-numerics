@@ -74,7 +74,7 @@ n.b. Columns are left empty when they cannot hold the value (attempting to inser
 [Documentation](https://www.postgresql.org/docs/current/datatype-numeric.html)
 
 ### Description
-According to the docs, they have have ENORMOUS capacity ("up to 131072 digits before the decimal point; up to 16383 digits after the decimal point") but trying to create a column that size in the database gives:
+According to the docs, they have have ENORMOUS capacity ("up to 131072 digits before the decimal point; up to 16383 digits after the decimal point") but trying to create a column that size in the database gives errors:
 ```sql
 CREATE TABLE numeric_test (col Numeric(131072, 16383));
 ERROR:  NUMERIC precision 131072 must be between 1 and 1000
@@ -82,13 +82,13 @@ LINE 1: CREATE TABLE numeric_test (col Numeric(131072, 16383));
 ```
 
 
-However, the following works. Here I am inserting a number with 114688 digits before and 16383 digits after the decimal point into a column with no defined precision and scale (note that `114072+16383` gives `131071`; and extra digit failed for some reason). Pardon the slightly ugly functions; nobody wants to see 130k '1's here:
+However, the following does work. Here I am inserting a number with 114688 digits before and 16383 digits after the decimal point into a column with no defined precision and scale (note that `114072+16383` gives `131071`; the full `131071` failed, perhaps to allow for displaying a decimal point?). Pardon the slightly ugly functions; nobody wants to see 130k '1's here:
 ```sql
 CREATE TABLE numeric_test (col Numeric);
 INSERT INTO numeric_test VALUES (TO_NUMBER(CONCAT(REPEAT('1', 114688), '.', REPEAT('1', 16383)), CONCAT(REPEAT('9', 114688), '.', REPEAT('9', 16383))));
 INSERT 0 1
 ```
-Therefore, in order to accurately store very large numbers in a PostgreSQL Numeric column you have to leave the precision and scale undefined. This seems like an odd decision given that the SQL standard does not define a limit on precision or scale.
+Therefore, in order to accurately store very large numbers in a PostgreSQL Numeric column you have to leave the precision and scale undefined. This seems like an odd decision given that the SQL standard does not define a limit on precision or scale, only their relationship.
 
 Not shown, but inserting a number with exactly `131072` digits before the decimal point AND `16383` digits after it causes an error. The *total* number of digits must be less than `131072` which is not clear from the docs.
 
@@ -227,7 +227,8 @@ SELECT * FROM numeric_test;
 ```
 
 ### Summary
-MySQL will accept any valid number, and store the value that the column can accomodate that is closest to the value given. It does raise warnings for this, but otherwise accepts any number (I expect this can be made more strict by configuration)
+MySQL will accept any number, and store the value that the column can accomodate that is closest to the value of that number For example, attempting to store 1000 in a column with a maximum possible value of 100 would result in the value 100 being stored. It raises a warning for this potential data loss rather than the SQL-defined exception, but otherwise accepts any number (I expect this can be made more strict by configuration).
+
 In MySQL, no column can have a `null` for `precision` or `scale`.
 
 
@@ -328,7 +329,7 @@ Time: 0.610s
 ```
 
 ### Summary
-MSSQLServer rejects values it cannot represent like PostgreSQL, but with much more restrictive precision and scale, more akin to that of MySQL, and the requirement that every column must have a precision and scale. It follows normal rounding rules.
+Like PostgreSQL, MSSQLServer rejects values it cannot represent, but with much more restrictive precision and scale, more akin to that of MySQL, and the requirement that every column must have a precision and scale. It follows normal rounding rules.
 
 
 
@@ -336,7 +337,7 @@ MSSQLServer rejects values it cannot represent like PostgreSQL, but with much mo
 ## Oracle
 ### Notes
 
-Oracle allows a much wider range of values for precision and scale than the SQL standard permits, allowing scale to be as low as -84, or up to 127, while precision is limited to between 1 and 38, inclusive.
+Oracle allows a much wider range of values for precision and scale than the SQL standard permits, allowing scale to be as low as -84, or up to 127, while precision is limited to between 1 and 38, inclusive. Note that the specification defines the relationship between the two values, rather than the absolute values of them. This is the way that Oracle deviates from the spec.
 
 ### Table Creation
 ```
@@ -366,7 +367,7 @@ COL_FIVE_FIVE																	   22			 5		      5
 ```
 
 ### Data Behaviour
-After inserting the data (multiple row insertions are not nice in Oracle), the table looks like this:
+After inserting the data (elided since multiple row insertions are not nice in Oracle), the table looks like this:
 ```sql
 
 SQL> SELECT * FROM numeric_test;
@@ -388,7 +389,7 @@ Note the empty values where that value caused an error in that column.
 
 
 ### Extra `scale` tests
-Since Oracle allows scale outside the normal range, I did some additional tests with columns where scale is outside the usual range (greater than precision, or less than 0)
+Since Oracle allows scale outside the normal range relative to , I did some additional tests with columns where scale is outside the usual range (greater than precision, or less than 0)
 ```
 SQL> CREATE TABLE test (col_1 Numeric(2, 5), col_2 Numeric(2, -5));
 Table created.
@@ -418,7 +419,8 @@ Scale outside the range usually allowed makes sense mathematically, but goes aga
 
 
 
-##Finally
+## Finally
+
 All of these databases handle Numerics differently in a variety of ways. The only one that even appears to follow the standard for everything I've tested is MS SQL Server.
 
 MySQL breaks the standard in that it does NOT raise an error when losing the most significant digit to rounding. PostgresQL breaks the standard in that it allows columns with null precision and scale, Oracle breaks the standard in that it allows scales less than 0 or greater than precision, and SQLite3 is not really SQL.
